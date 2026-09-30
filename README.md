@@ -1,14 +1,15 @@
-# LiteRadio PLUS: ELRS 3.x manual-radio port
+# LiteRadio PLUS: ELRS 3.x with USB HID control
 
 Firmware for **BETAFPV LiteRadio 2 SE V2 ELRS 2.4 GHz**, based on this
 LiteRadio_PLUS fork and the OTA protocol in **ExpressLRS 3.5.3**.
 
-**Status:** software build and native protocol tests pass. Binding, physical
-channel operation, RF timing and reconnection on Matrix hardware are **not yet
-verified**. This is a bench-test firmware, not a completed PC-control release.
+**Status:** manual ELRS binding and control were confirmed working by the user.
+This build adds a separate USB command/telemetry HID interface, concurrent physical
+joystick reports, hovercraft mapping and a PC watchdog. The USB additions pass
+host tests and compile, but still need hardware verification.
 
-The reported unstable link after binding exposed a missed SPI command-read
-defect, now corrected. See the [audit findings](docs/ELRS3-audit.md).
+The earlier unstable-link SPI defect is documented in the [audit](docs/ELRS3-audit.md).
+See [USB controls, mapping, protocol and test utility](docs/USB-control.md).
 
 ## Implemented
 
@@ -18,6 +19,10 @@ defect, now corrected. See the [audit findings](docs/ELRS3-audit.md).
 * Telemetry receive slots, RX interrupt dispatch, link statistics and bounded
   raw CRSF frame reconstruction/acknowledgement.
 * Coherent channel snapshots and rate/bind transitions; no USB work in RF ISRs.
+* Vendor HID commands, SC manual/PC selection, 100 ms watchdog and telemetry forwarding.
+* CH3 Ele/GV1 at 200%/-100%, CH4 Ail/GV2, CH5 physical SB, CH6 Thr/GV3.
+* Original joystick report format and bootloader/virtual COM path retained.
+  The application itself has no CDC COM interface.
 
 See [architecture and exact protocol differences](docs/ELRS3-port.md) and
 [hardware acceptance checklist](docs/bench-test.md). Build sizes, test coverage
@@ -67,7 +72,7 @@ identity and calibration/configuration data below that address must be kept.
 2. Use [BETAFPV Configurator](https://github.com/BETAFPV/BETAFPV_Configurator/releases)
    with the **LiteRadio 2 SE V2 / SX1280** model. Follow the vendor's
    [V2-to-V3 flashing procedure](https://support.betafpv.com/hc/en-us/articles/22404447195673-How-to-Update-ELRS-V2-to-ELRS-V3),
-   load the local `artifacts/LiteRadio_2_SE_V2_ELRS3_manual.bin`, then flash.
+   load the local `artifacts/LiteRadio_2_SE_V2_ELRS3_USB.bin`, then flash.
    This is an STM32 application BIN; do not load it into ExpressLRS Configurator
    as an ESP receiver/module image. Custom firmware acceptance by the vendor
    configurator still requires a hardware test.
@@ -97,11 +102,12 @@ telemetry slots/s; CRSF frames take several slots, and link-stat packets also
 use this bandwidth. RC slots are reduced accordingly. Change RF settings only
 while disarmed: saving STM32 flash briefly interrupts the link.
 
-Internal mixer values remain **988..2012**, nominal center 1500, converted to
-CRSF 172..1811 before V3 packing. OTA CH1..4 are **aileron, elevator, throttle,
-rudder** (AETR). AUX1/CH5 is a low-latency two-position arm/enable switch.
-Physical AUX2..4 use Hybrid switch bins; AUX5..8 are centered. Four primary
-controls have 10-bit OTA resolution. Configure Betaflight accordingly.
+Channel values remain **988..2012**, nominal center 1500, converted to CRSF
+before V3 packing. The [hovercraft profile](docs/USB-control.md) maps CH3 to
+forward thrust, CH4 to differential thrust, CH5 to SB, and CH6 to lift.
+ELRS Hybrid is unchanged: CH1..4 have 10-bit resolution, CH5 is two-position,
+and **CH6 has seven positions**. The legacy joystick reports physical controls
+through its saved mixer, independently of PC commands.
 
 Use an ELRS **3.x** receiver with matching regulatory domain and model match
 disabled. Matrix's receiver is serial CRSF on UART3; changing Betaflight
@@ -126,18 +132,24 @@ becomes disconnected; this is a diagnostic, not the receiver's RF failsafe.
 (up to 64 bytes, including address, length, type and CRC). `.frames` and
 `.rejected` count accepted/rejected transfers. The standard CRC8-D5 is checked;
 oversized/invalid frames are discarded, never published as truncated data.
-These are debugger-visible values for this milestone; frames are not queued
-or forwarded over USB yet.
+The new vendor HID interface forwards complete frames in fragments and reports
+any skipped complete frames caused by host backpressure.
 
 RF loss still relies on ELRS receiver/Betaflight failsafe configuration. Verify
-that loss disarms and produces safe motor outputs. There is no PC-command
-watchdog yet because this firmware accepts no autonomous channel commands.
+that loss disarms and produces safe motor outputs. The separate USB command
+watchdog defaults to 100 ms. With SC high, timeout or USB loss selects safe
+thrust/lift outputs; SB retains control of CH5. Cycle SC before restarting PC control.
 
-## USB / next milestone
+## USB test utility
 
-The existing joystick/configuration HID interface is retained. New report IDs
-0x10/0x20/0x21, PC channel commands, MANUAL/PC/FAILSAFE arbitration, PC watchdog,
-hovercraft mixing and the Python HID test utility are **not implemented**.
-Those follow successful manual Matrix binding/control, as required by the
-project milestone order. The existing status logic still controls when USB
-joystick and RF tasks run; simultaneous bidirectional USB/RF is not claimed.
+```powershell
+python -m pip install hidapi
+python tools/pc_hid.py --list
+python tools/pc_hid.py --joystick
+python tools/pc_hid.py --send --gv1 0 --gv2 0 --gv3 -100
+```
+
+The utility monitors by default. `--send` transmits a 50 Hz command stream.
+Put SC low before starting, then high to permit PC control. GV1/2/3 replace
+Ele/Ail/Thr **before mixing**. Full report formats, limits and acceptance steps
+are in [USB-control.md](docs/USB-control.md).

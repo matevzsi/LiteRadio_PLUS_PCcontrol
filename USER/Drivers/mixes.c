@@ -16,6 +16,18 @@ mixData_t mixData[8];
 uint16_t mixesBuff[8];
 uint8_t mixUpdateFlag;
 uint16_t controlMode;
+static uint16_t manualSnapshot[8] = {1500,1500,988,1500,988,988,988,988};
+static uint16_t inputSnapshot[8] = {1500,1500,988,1500,988,988,988,988};
+void Mixes_GetSnapshot(uint16_t channels[8], uint16_t inputs[8])
+{
+    unsigned i;
+    taskENTER_CRITICAL();
+    for (i=0;i<8;++i) {
+        channels[i]=manualSnapshot[i];
+        if (inputs) inputs[i]=inputSnapshot[i];
+    }
+    taskEXIT_CRITICAL();
+}
     
 void Mixes_Init()
 {   
@@ -37,7 +49,7 @@ void Mixes_ChannelInit(uint8_t channel)
 {
     STMFLASH_Read(MIX_CHANNEL_INFO_ADDR+channel*8,mixesBuff,4);   
     /*混控设置自检*/
-    if((mixesBuff[0] > 8) || (mixesBuff[1] > 1) || (mixesBuff[2] > 100) || (mixesBuff[3] > 200))
+    if((mixesBuff[0] >= 8) || (mixesBuff[1] > 1) || (mixesBuff[2] > 100) || (mixesBuff[3] > 200))
     {
         mixesBuff[0] = channel;
         mixesBuff[1] = 0;
@@ -271,8 +283,9 @@ void mixesTask(void* param)
         512,512,512,512,512,512,512,512,512,512,
     };
     uint16_t mixesBuff[8];
-    uint16_t gimbalVaBuff[4];
-    uint16_t switchesValBuff[4];
+    uint16_t gimbalVaBuff[4] = {988,1500,1500,1500};
+    uint16_t switchesValBuff[4] = {988,988,988,988};
+    uint16_t logicalInputs[8];
 
     mixesDelayTime = Get_ProtocolDelayTime();
     STMFLASH_Read(CONFIGER_INFO_MODE_ADDR,&controlMode,1);
@@ -294,8 +307,8 @@ void mixesTask(void* param)
             mixUpdateFlag = 0x00;
         }
         
-        xQueueReceive(gimbalValQueue,gimbalVaBuff,0);
-        xQueueReceive(switchesValQueue,switchesValBuff,0);
+        while (xQueueReceive(gimbalValQueue,gimbalVaBuff,0) == pdTRUE) {}
+        while (xQueueReceive(switchesValQueue,switchesValBuff,0) == pdTRUE) {}
         
         /*日本手模式1，美国手模式0*/
         if(controlMode == 1)
@@ -316,7 +329,12 @@ void mixesTask(void* param)
         mixesBuff[4] = switchesValBuff[0];
         mixesBuff[5] = switchesValBuff[1];
         mixesBuff[6] = switchesValBuff[2];
-        mixesBuff[7] = switchesValBuff[3];   
+        mixesBuff[7] = switchesValBuff[3];
+        logicalInputs[0]=mixesBuff[AILERON];
+        logicalInputs[1]=mixesBuff[ELEVATOR];
+        logicalInputs[2]=mixesBuff[THROTTLE];
+        logicalInputs[3]=mixesBuff[RUDDER];
+        for (unsigned i=4;i<8;++i) logicalInputs[i]=mixesBuff[i];
         for(mixIndex = 0;mixIndex < 8;mixIndex++)
         {
             
@@ -382,6 +400,11 @@ void mixesTask(void* param)
         mixesBuff[5] = mixData[5].output;
         mixesBuff[6] = mixData[6].output;        
         mixesBuff[7] = mixData[7].output;                      
+        taskENTER_CRITICAL();
+        for (unsigned i=0;i<8;++i) {
+            manualSnapshot[i]=mixesBuff[i]; inputSnapshot[i]=logicalInputs[i];
+        }
+        taskEXIT_CRITICAL();
         xQueueSend(mixesValQueue,mixesBuff,0);
         if(externalCRSFdata.lastConfigStatus == CONFIG_CRSF_ON && externalCRSFdata.configStatus == CONFIG_CRSF_ON)
         {

@@ -9,6 +9,8 @@
 #include "status.h"
 #include "crsf.h"
 #include "common.h"
+#include "usb_pc.h"
+#include "usbd_custom_hid_if.h"
 
 static uint32_t joystickDelayTime;
 TaskHandle_t joystickTaskHandle;
@@ -18,7 +20,7 @@ uint16_t sendSpam;
 extern crsfParameter_t externalRFprarmeter;
 void joystickTask(void *param) 
 {
-    uint16_t hidReportData[8];
+    static uint16_t hidReportData[8];
     uint16_t requestDataBuff[8];
     uint16_t mixValBuff[8];
 
@@ -26,7 +28,11 @@ void joystickTask(void *param)
     while(1)
     {
         vTaskDelay(joystickDelayTime);
-        xQueueReceive(mixesValQueue,mixValBuff,0);
+        Mixes_GetSnapshot(mixValBuff,0);
+        USB_LegacyPoll();
+#if defined(LiteRadio_Plus_SX1280)
+        USB_PC_Poll();
+#endif
      
 //        hidReportData[0] = map(mixValBuff[0],988,2012,0,2047);
 //        hidReportData[1] = map(mixValBuff[1],988,2012,0,2047);
@@ -37,7 +43,7 @@ void joystickTask(void *param)
 //        hidReportData[6] = map(mixValBuff[6],988,2012,0,2047);
 //        hidReportData[7] = map(mixValBuff[7],988,2012,0,2047);
 
-        if (requestType1 == REQUEST_CHANNEL_INFO)
+        if (requestType1 == REQUEST_CHANNEL_INFO && requestType2 >= 1 && requestType2 <= 8)
         {
             hidReportData[0] = CHANNEILS_INFO_ID|((requestType2- 0x01) << 8);
             hidReportData[1] = mixData[requestType2- 0x01].gimbalChannel|(mixData[requestType2- 0x01].reverse << 8);

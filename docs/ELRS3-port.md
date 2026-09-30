@@ -1,5 +1,8 @@
 # ELRS 3.x manual-radio milestone
 
+This records the original manual-radio milestone. The user has confirmed it
+works; the subsequent [USB extension](USB-control.md) is now implemented.
+
 ## References and scope
 
 Compared against official ExpressLRS **3.5.3**, commit

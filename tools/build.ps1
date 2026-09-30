@@ -14,17 +14,17 @@ if ($process.ExitCode -gt 1 -or -not (Select-String -LiteralPath $log -Pattern '
     throw "Keil build failed (exit $($process.ExitCode)); see $log"
 }
 $files = @{
-    'MDK-ARM\LiteRadio_Plus.bin' = 'LiteRadio_2_SE_V2_ELRS3_manual.bin'
-    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.hex' = 'LiteRadio_2_SE_V2_ELRS3_manual.hex'
-    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.axf' = 'LiteRadio_2_SE_V2_ELRS3_manual.axf'
-    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.map' = 'LiteRadio_2_SE_V2_ELRS3_manual.map'
+    'MDK-ARM\LiteRadio_Plus.bin' = 'LiteRadio_2_SE_V2_ELRS3_USB.bin'
+    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.hex' = 'LiteRadio_2_SE_V2_ELRS3_USB.hex'
+    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.axf' = 'LiteRadio_2_SE_V2_ELRS3_USB.axf'
+    'MDK-ARM\LiteRadio_Plus\LiteRadio_Plus.map' = 'LiteRadio_2_SE_V2_ELRS3_USB.map'
 }
 foreach ($source in $files.Keys) {
     $path = Join-Path $root $source
     if ((Get-Item -LiteralPath $path).LastWriteTime -lt $started) { throw "Stale artifact: $path" }
     Copy-Item -LiteralPath $path -Destination (Join-Path $output $files[$source])
 }
-Get-ChildItem -LiteralPath $output -Filter 'LiteRadio_2_SE_V2_ELRS3_manual.*' |
+Get-ChildItem -LiteralPath $output -Filter 'LiteRadio_2_SE_V2_ELRS3_USB.*' |
     Get-FileHash -Algorithm SHA256 |
     ForEach-Object { '{0}  {1}' -f $_.Hash.ToLower(), (Split-Path -Leaf $_.Path) } |
     Set-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt')

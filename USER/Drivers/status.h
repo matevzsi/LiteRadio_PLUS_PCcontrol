@@ -33,6 +33,7 @@ extern uint8_t configFlag;
 uint32_t Get_ProtocolDelayTime(void);
 void Status_Init(void);
 void Status_Update(void);
+uint8_t Status_RadioPowered(void);
 void statusTask(void* param);
 uint8_t Get_ProtocolIndex(void);
 #endif  

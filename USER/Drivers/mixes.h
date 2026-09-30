@@ -86,6 +86,7 @@ extern TaskHandle_t mixesTaskHandle;
 extern QueueHandle_t mixesValQueue;
 void Mixes_Init(void);
 void Mixes_Update(void);
+void Mixes_GetSnapshot(uint16_t channels[8], uint16_t inputs[8]);
 void Mixes_ChannelInit(uint8_t channel);
 void Mixes_ChannelUpdate(uint8_t channel);
 uint16_t Mixes_Switchreverse(uint8_t reverse, uint16_t gimbalValCurr);

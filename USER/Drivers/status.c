@@ -14,6 +14,9 @@
 #include "gimbal.h"
 #include "function.h"
 #include "common.h" 
+#if defined(LiteRadio_Plus_SX1280)
+#include "pc_control.h"
+#endif
 
 uint8_t requestType1;
 uint8_t requestType2;
@@ -27,6 +30,7 @@ static uint8_t RCstatus = RC_SHUTDOWN;
 static uint8_t lastRCstatus = RC_SHUTDOWN;
 static uint8_t RFstatus = RF_DATA;
 static uint8_t powerStatus = RC_POWER_OFF;
+uint8_t Status_RadioPowered(void) { return powerStatus == RC_POWER_ON; }
 static uint64_t lowElectricityNowTick;
 static uint64_t lowElectricityLastTick;
 
@@ -139,6 +143,7 @@ uint8_t Get_ProtocolIndex()
 
 void Status_Update()
 {
+    vTaskResume(joystickTaskHandle);
     if(powerStatus == RC_POWER_ON)
     {
        if(protocolIndex == CRSF_PROTOCOL_INDEX)
@@ -158,7 +163,6 @@ void Status_Update()
         }
         if(lastRCstatus == RC_CHRG_AND_JOYSTICK)
         {
-            vTaskSuspend(joystickTaskHandle); 
             vTaskResume(radiolinkTaskHandle);
 #if defined(LiteRadio_Plus_SX1280)||(LiteRadio_Plus_SX1276)              
             if(protocolIndex != CRSF_PROTOCOL_INDEX)
@@ -170,6 +174,11 @@ void Status_Update()
     }
     if(powerStatus == RC_POWER_OFF)
     {		
+#if defined(LiteRadio_Plus_SX1280)
+        taskENTER_CRITICAL();
+        pc_control_disconnect();
+        taskEXIT_CRITICAL();
+#endif
         if(protocolIndex == CRSF_PROTOCOL_INDEX)
         {
             HAL_GPIO_WritePin(EXTERNAL_RF_EN_GPIO_Port, EXTERNAL_RF_EN_Pin, GPIO_PIN_RESET);   

@@ -8,6 +8,9 @@
 #include "tim.h"
 #include "delay.h"
 #include "status.h"
+#include "pc_control.h"
+#include "usbd_def.h"
+extern USBD_HandleTypeDef hUsbDeviceFS;
 #if defined(LiteRadio_Plus_CC2500) 
 #include "frsky_d8.h"
 #include "frsky_d16.h"
@@ -49,6 +52,7 @@ uint8_t Get_Protocol_Select(void)
 
 void radiolinkTask(void* param)
 {
+    uint16_t physical[8], manual[8];
     EventBits_t radioEvent;
     radiolinkDelayTime = Get_ProtocolDelayTime();
     switch(versionSelectFlg)
@@ -110,7 +114,15 @@ void radiolinkTask(void* param)
     while(1)
     {
         vTaskDelay(radiolinkDelayTime);
-        xQueueReceive(mixesValQueue,rfcontrolData,0);
+        Mixes_GetSnapshot(manual,physical);
+#if defined(LiteRadio_Plus_SX1280)
+        taskENTER_CRITICAL();
+        pc_control_step(physical,manual,rfcontrolData,HAL_GetTick(),
+                        hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED);
+        taskEXIT_CRITICAL();
+#else
+        for (unsigned i=0;i<8;++i) rfcontrolData[i]=manual[i];
+#endif
         radioEvent= xEventGroupWaitBits( radioEventHandle,
                                          RADIOLINK_BIND,
                                          pdTRUE,

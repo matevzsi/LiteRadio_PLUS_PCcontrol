@@ -42,10 +42,10 @@ extern "C" {
   * @{
   */
 #define CUSTOM_HID_EPIN_ADDR                 0x81U
-#define CUSTOM_HID_EPIN_SIZE                 0x02U
+#define CUSTOM_HID_EPIN_SIZE                 0x40U
 
 #define CUSTOM_HID_EPOUT_ADDR                0x01U
-#define CUSTOM_HID_EPOUT_SIZE                0x02U
+#define CUSTOM_HID_EPOUT_SIZE                0x40U
 
 #define USB_CUSTOM_HID_CONFIG_DESC_SIZ       41U
 #define USB_CUSTOM_HID_DESC_SIZ              9U
@@ -107,6 +107,7 @@ typedef struct
   uint32_t             IdleState;
   uint32_t             AltSetting;
   uint32_t             IsReportAvailable;
+  uint16_t             ReceivedLength;
   CUSTOM_HID_StateTypeDef     state;
 }
 USBD_CUSTOM_HID_HandleTypeDef;

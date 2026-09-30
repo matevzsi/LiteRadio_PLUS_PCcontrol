@@ -106,7 +106,11 @@ spi = function(read(ROOT / 'USER/Hardware/sx1280hal.c'), 'SX1280_HalReadCommand'
 if 'halTxBuffer[size + 2]' in spi:
     spi = spi.replace('halTxBuffer[size + 2]', 'halTxBuffer[258]').replace('sizeof(halTxBuffer)', '(size + 2)')
 (OUT / 'spi.inc').write_text(spi, encoding='utf-8')
+usb = read(ROOT / 'USER/Drivers/usb_pc.c')
+(OUT / 'usb_pc.inc').write_text(re.sub(r'^#include.*$', '', usb, flags=re.M), encoding='utf-8')
 sources = [ROOT / 'tests/test_spi.cpp', ROOT / 'tests/test_elrs_v3.cpp', OUT / 'oracle.cpp', OUT / 'fhss.c',
+           ROOT / 'tests/test_pc.cpp', ROOT / 'USER/Drivers/pc_control.c',
+           ROOT / 'tests/test_usb.cpp',
            ROOT / 'USER/protocol/elrs_v3.c', ROOT / 'tests/test_scheduler.cpp', ROOT / 'tests/test_radio.cpp']
 radio = read(ROOT / 'USER/Hardware/sx1280.c')
 (OUT / 'radio.inc').write_text('\n'.join(function(radio, n) for n in
@@ -114,7 +118,7 @@ radio = read(ROOT / 'USER/Hardware/sx1280.c')
 exe = OUT / ('tests.exe' if shutil.which('cl') else 'tests')
 if shutil.which('cl'):
     command = ['cl', '/nologo', '/utf-8', '/EHsc', '/std:c++14', '/I' + str(ROOT / 'USER/protocol'),
-               '/I' + str(OUT), '/I' + str(ROOT / 'USER/Hardware'), *map(str, sources), '/Fe:' + str(exe)]
+               '/I' + str(OUT), '/I' + str(ROOT / 'USER/Hardware'), '/I' + str(ROOT / 'USER/Drivers'), *map(str, sources), '/Fe:' + str(exe)]
 else:
     # Compile C units as C, preserving linkage.
     objects = []
@@ -122,7 +126,7 @@ else:
         obj = OUT / (src.stem + '.o')
         compiler = 'gcc' if src.suffix == '.c' else 'g++'
         subprocess.run([compiler, '-I' + str(ROOT / 'USER/protocol'), '-I' + str(OUT),
-                        '-I' + str(ROOT / 'USER/Hardware'),
+                        '-I' + str(ROOT / 'USER/Hardware'), '-I' + str(ROOT / 'USER/Drivers'),
                         '-c', str(src), '-o', str(obj)], check=True, cwd=OUT)
         objects.append(str(obj))
     command = ['g++', *objects, '-o', str(exe)]

@@ -383,6 +383,8 @@ static uint8_t  USBD_CUSTOM_HID_Init(USBD_HandleTypeDef *pdev,
     hhid = (USBD_CUSTOM_HID_HandleTypeDef *) pdev->pClassData;
 
     hhid->state = CUSTOM_HID_IDLE;
+    hhid->IsReportAvailable = 0;
+    hhid->ReceivedLength = 0;
     ((USBD_CUSTOM_HID_ItfTypeDef *)pdev->pUserData)->Init();
 
     /* Prepare Out endpoint to receive 1st packet */
@@ -460,6 +462,7 @@ static uint8_t  USBD_CUSTOM_HID_Setup(USBD_HandleTypeDef *pdev,
 
         case CUSTOM_HID_REQ_SET_REPORT:
           hhid->IsReportAvailable = 1U;
+          hhid->ReceivedLength = req->wLength;
           USBD_CtlPrepareRx(pdev, hhid->Report_buf, req->wLength);
           break;
 
@@ -639,6 +642,8 @@ static uint8_t  USBD_CUSTOM_HID_DataOut(USBD_HandleTypeDef *pdev,
 
   USBD_CUSTOM_HID_HandleTypeDef     *hhid = (USBD_CUSTOM_HID_HandleTypeDef *)pdev->pClassData;
 
+  hhid->ReceivedLength = USBD_LL_GetRxDataSize(pdev,epnum);
+
   ((USBD_CUSTOM_HID_ItfTypeDef *)pdev->pUserData)->OutEvent(hhid->Report_buf[0],
                                                             hhid->Report_buf[1]);
 
@@ -660,6 +665,7 @@ static uint8_t USBD_CUSTOM_HID_EP0_RxReady(USBD_HandleTypeDef *pdev)
 
   if (hhid->IsReportAvailable == 1U)
   {
+    hhid->ReceivedLength = USBD_LL_GetRxDataSize(pdev,0);
     ((USBD_CUSTOM_HID_ItfTypeDef *)pdev->pUserData)->OutEvent(hhid->Report_buf[0],
                                                               hhid->Report_buf[1]);
     hhid->IsReportAvailable = 0U;

@@ -167,13 +167,12 @@ void startTask(void *param)
         xTaskCreate(gimbalTask, "GIMBAL", 100, NULL, 3, NULL);
         xTaskCreate(rgbTask, "RGB", 128, NULL, 3, NULL);       
         xTaskCreate(buzzerTask, "BUZZER", 64, NULL, 1, NULL);         
-        xTaskCreate(joystickTask, "JOYSTICK", 128, NULL, 3, &joystickTaskHandle);
+        xTaskCreate(joystickTask, "JOYSTICK", 192, NULL, 3, &joystickTaskHandle);
         xTaskCreate(switchesTask, "SWITCHES", 100, NULL, 2, NULL);
         xTaskCreate(mixesTask, "MIXES", 600, NULL, 3, &mixesTaskHandle); 
         xTaskCreate(keyTask, "BUTTON_SCAN", 80, NULL, 3, NULL);
  
   
-        vTaskSuspend(joystickTaskHandle);//挂起joystick
         vTaskSuspend(radiolinkTaskHandle);//挂起radiolink
         
         vTaskDelete(startTaskHandle);

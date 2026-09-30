@@ -19,6 +19,8 @@ uint32_t oracle_seed(const uint8_t *);
 void test_scheduler();
 void test_radio();
 void test_spi();
+void test_pc();
+void test_usb();
 
 static uint8_t crc8(const uint8_t *p, unsigned n) {
     unsigned crc=0;
@@ -66,6 +68,8 @@ static void telemetry_tests() {
 
 int main() {
     test_spi();
+    test_pc();
+    test_usb();
     std::mt19937 gen(0x353);
     uint8_t packet[8], expected[8];
     for(unsigned sample=0;sample<10000;++sample) {
@@ -115,4 +119,5 @@ int main() {
     test_radio();
     puts("PASS: 140000 upstream channel comparisons and RX round trips, 1000 complete FHSS/seed comparisons,");
     puts("      frequency wrap, sync fields, telemetry CRC/reassembly, RF scheduling and radio IRQs.");
+    puts("      USB routing/descriptors/telemetry, PC mapping, watchdog, replay and disconnect tests.");
 }

@@ -26,6 +26,7 @@
 #include "usbd_desc.h"
 #include "usbd_customhid.h"
 #include "usbd_custom_hid_if.h"
+#include "usb_pc.h"
 
 /* USER CODE BEGIN Includes */
 
@@ -73,7 +74,11 @@ void MX_USB_DEVICE_Init(void)
   {
     Error_Handler();
   }
+#if defined(LiteRadio_Plus_SX1280)
+  if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_PC_COMPOSITE) != USBD_OK)
+#else
   if (USBD_RegisterClass(&hUsbDeviceFS, &USBD_CUSTOM_HID) != USBD_OK)
+#endif
   {
     Error_Handler();
   }

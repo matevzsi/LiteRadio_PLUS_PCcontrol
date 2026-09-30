@@ -21,7 +21,7 @@ typedef struct {
     uint8_t used;
     uint8_t overflow;
     uint8_t assembling[ELRS_V3_CRSF_MAX];
-    /* Last complete, CRC-checked frame for debugger inspection. No USB yet. */
+    /* Last complete CRC-checked frame; USB bridge snapshots it outside RF IRQs. */
     uint8_t frame[ELRS_V3_CRSF_MAX];
     uint8_t length;
     uint32_t frames;

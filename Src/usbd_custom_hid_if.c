@@ -31,6 +31,7 @@
 #include "crsf.h"
 #include "joystick.h"
 #include "stdbool.h"
+#include <string.h>
 #include "common.h"
 #if defined(LiteRadio_Plus_SX1280)||(LiteRadio_Plus_SX1276)
 #include "common.h"
@@ -44,6 +45,8 @@
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 uint8_t USB_Recive_Buffer[64]; 
+static uint8_t legacy_pending[64];
+static volatile uint8_t legacy_length;
 extern uint8_t MasterUID[6];
 extern uint16_t BuzzerSwitch;
 extern bool MasterUidUseChipIDFlag;
@@ -225,6 +228,7 @@ USBD_CUSTOM_HID_ItfTypeDef USBD_CustomHID_fops_FS =
 static int8_t CUSTOM_HID_Init_FS(void)
 {
   /* USER CODE BEGIN 4 */
+  legacy_length=0;
   return (USBD_OK);
   /* USER CODE END 4 */
 }
@@ -249,18 +253,13 @@ static int8_t CUSTOM_HID_DeInit_FS(void)
 static int8_t CUSTOM_HID_OutEvent_FS(uint8_t event_idx, uint8_t state)
 {
   /* USER CODE BEGIN 6 */
-    char i;
-
-    USBD_CUSTOM_HID_HandleTypeDef   *hhid;
-    unsigned char USB_Received_Count = 0;
-    USB_Received_Count = USBD_GetRxCount( &hUsbDeviceFS,CUSTOM_HID_EPOUT_ADDR ); 
-    hhid = (USBD_CUSTOM_HID_HandleTypeDef*)hUsbDeviceFS.pClassData;
-    
-    for(i=0;i<USB_Received_Count;i++) 
-    {
-        USB_Recive_Buffer[i]=hhid->Report_buf[i]; 
+    USBD_CUSTOM_HID_HandleTypeDef *hhid = (USBD_CUSTOM_HID_HandleTypeDef*)hUsbDeviceFS.pClassData;
+    uint16_t count = hhid->ReceivedLength;
+    /* Configurator writes run in task context, with RF off. */
+    if (count && count <= 64 && !legacy_length) {
+        memcpy(legacy_pending,hhid->Report_buf,count);
+        legacy_length=(uint8_t)count;
     }
-    SaveMixValueToFlash();
     return (USBD_OK);
     
   /* USER CODE END 6 */
@@ -282,6 +281,39 @@ static int8_t USBD_CUSTOM_HID_SendReport_FS(uint8_t *report, uint16_t len)
 /* USER CODE END 7 */
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
+void USB_LegacyPoll(void)
+{
+    uint8_t count;
+    taskENTER_CRITICAL();
+    count=legacy_length;
+    if (count) {
+        memset(USB_Recive_Buffer,0,sizeof(USB_Recive_Buffer));
+        memcpy(USB_Recive_Buffer,legacy_pending,count);
+        legacy_length=0;
+    }
+    taskEXIT_CRITICAL();
+    if (!count) return;
+    if (Status_RadioPowered() && USB_Recive_Buffer[0] != REQUEST_INFO_ID) return;
+    switch (USB_Recive_Buffer[0]) {
+    case CHANNEILS_INPUT_ID:
+        if (count<6 || USB_Recive_Buffer[1]>=8 || USB_Recive_Buffer[2]>=8 ||
+            USB_Recive_Buffer[3]>1 || USB_Recive_Buffer[4]>100 || USB_Recive_Buffer[5]>200) return;
+        break;
+    case LITE_CONFIGER_INFO_ID: if (count<4) return; break;
+    case EXTRA_CUSTOM_CONFIG_ID: if (count<3) return; break;
+    case INTERNAL_CONFIGER_INFO_ID: if (count<5) return; break;
+    case EXTERNAL_CONFIGER_INFO_ID: if (count<8) return; break;
+    case UID_BYTES_ID: if (count<7) return; break;
+    case REQUEST_INFO_ID: if (count<3) return; break;
+    default: return;
+    }
+    /* Prevent power-on task from starting RF midway through a flash write. */
+    vTaskSuspendAll();
+    if (!Status_RadioPowered() || USB_Recive_Buffer[0] == REQUEST_INFO_ID)
+        SaveMixValueToFlash();
+    xTaskResumeAll();
+}
+
 void SaveMixValueToFlash(void)
 {
     uint16_t writeWord[10];
@@ -319,6 +351,7 @@ void SaveMixValueToFlash(void)
             {
                 STMFLASH_Write(JoystickDeadZonePercent_ADDR,&writeWord[2],1); 
             }
+            break;
         }
         
 #if defined(LiteRadio_Plus_SX1280)    
@@ -364,6 +397,7 @@ void SaveMixValueToFlash(void)
                 STMFLASH_Write(MasterID5FromBindPhrase_ADDR,&writeWord[5],1);
                 STMFLASH_Write(MasterID6FromBindPhrase_ADDR,&writeWord[6],1);
             }
+            break;
         }
 #endif   
         case EXTERNAL_CONFIGER_INFO_ID:
