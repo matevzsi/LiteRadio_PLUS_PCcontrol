@@ -461,6 +461,12 @@ static uint8_t  USBD_CUSTOM_HID_Setup(USBD_HandleTypeDef *pdev,
           break;
 
         case CUSTOM_HID_REQ_SET_REPORT:
+          if (!req->wLength || req->wLength > USBD_CUSTOMHID_OUTREPORT_BUF_SIZE)
+          {
+            USBD_CtlError(pdev,req);
+            ret=USBD_FAIL;
+            break;
+          }
           hhid->IsReportAvailable = 1U;
           hhid->ReceivedLength = req->wLength;
           USBD_CtlPrepareRx(pdev, hhid->Report_buf, req->wLength);

@@ -15,7 +15,8 @@ enum { USBD_OK, USBD_BUSY, USBD_FAIL, USBD_STATE_CONFIGURED=3, USBD_EP_TYPE_INTR
        CUSTOM_HID_REQ_GET_IDLE=2, CUSTOM_HID_REQ_SET_PROTOCOL=11, CUSTOM_HID_REQ_GET_PROTOCOL=3 };
 struct USBD_SetupReqTypedef { uint8_t bmRequest,bRequest; uint16_t wValue,wIndex,wLength; };
 struct Endpoint { uint8_t is_used; };
-struct USBD_HandleTypeDef { uint8_t dev_state; Endpoint ep_in[3],ep_out[3]; };
+struct USBD_HandleTypeDef { uint8_t dev_state; Endpoint ep_in[3],ep_out[3]; void *pClassData; };
+struct USBD_CUSTOM_HID_HandleTypeDef { uint32_t IsReportAvailable; };
 typedef uint8_t (*InitFn)(USBD_HandleTypeDef*,uint8_t);
 typedef uint8_t (*SimpleFn)(USBD_HandleTypeDef*);
 struct USBD_ClassTypeDef {
@@ -86,6 +87,9 @@ void test_usb() {
     control_buffer[3]=1;control_buffer[6]=0x2c;control_buffer[8]=100;
     for(unsigned i=0;i<8;++i) put16(control_buffer+10+i*2,1500);
     auto accepted=pcControl.accepted;
+    received_size=63;
+    assert(rxready(dev)==USBD_OK && pcControl.accepted==accepted);
+    assert(pc_setup(dev,&req)==USBD_OK);
     received_size=64;
     assert(rxready(dev)==USBD_OK && pcControl.accepted==accepted+1);
     memcpy(received_buffer,control_buffer,64);received_buffer[4]=1;received_size=64;

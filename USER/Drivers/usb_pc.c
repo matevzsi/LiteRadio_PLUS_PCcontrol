@@ -68,6 +68,8 @@ static uint8_t pc_setup(USBD_HandleTypeDef *dev, USBD_SetupReqTypedef *req)
 {
     static uint16_t status;
     control_pending = 0; /* A new setup aborts any previous control transfer. */
+    if (dev->pClassData)
+        ((USBD_CUSTOM_HID_HandleTypeDef *)dev->pClassData)->IsReportAvailable=0;
     if (req->wIndex == 0) {
         if (req->bRequest == CUSTOM_HID_REQ_SET_REPORT &&
             (req->bmRequest & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_CLASS &&
