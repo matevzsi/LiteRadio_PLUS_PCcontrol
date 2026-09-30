@@ -240,7 +240,7 @@ typedef struct expresslrs_mod_settings_s
 
 #if defined(Regulatory_Domain_ISM_2400)
 #define RATE_MAX 4
-#define RATE_DEFAULT 3
+#define RATE_DEFAULT 2
 #define RATE_BINDING 3
 typedef struct expresslrs_mod_settings_s
 {

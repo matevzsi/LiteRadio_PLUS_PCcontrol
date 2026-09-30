@@ -2,6 +2,7 @@
 #include "function.h"
 #include "mixes.h"
 #include "crsf.h"
+#include "elrs_v3.h"
 uint8_t UID[6];
 uint16_t crc14tab[ELRS_CRC_LEN] = {0};
 uint16_t elrsControlData[8] = {0};
@@ -34,15 +35,15 @@ expresslrs_rf_pref_params_s ExpressLRS_AirRateRFperf[RATE_MAX] = {
 
 expresslrs_mod_settings_s ExpressLRS_AirRateConfig[RATE_MAX] = {
   {0, RATE_500HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF5, SX1280_LORA_CR_LI_4_6, 2000, TLM_RATIO_1_128, 4, 12, 8},
-    {1, RATE_250HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF6, SX1280_LORA_CR_LI_4_7, 4000, TLM_RATIO_1_64, 4, 14, 8},
-    {2, RATE_150HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF7, SX1280_LORA_CR_LI_4_7, 6666, TLM_RATIO_1_32, 4, 12, 8},
-    {3, RATE_50HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF9, SX1280_LORA_CR_LI_4_6, 20000, TLM_RATIO_NO_TLM, 2, 12, 8}};
+    {1, RATE_250HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF6, SX1280_LORA_CR_LI_4_8, 4000, TLM_RATIO_1_64, 4, 14, 8},
+    {2, RATE_150HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF7, SX1280_LORA_CR_LI_4_8, 6666, TLM_RATIO_1_32, 4, 12, 8},
+    {3, RATE_50HZ, SX1280_LORA_BW_0800, SX1280_LORA_SF8, SX1280_LORA_CR_LI_4_8, 20000, TLM_RATIO_1_16, 2, 12, 8}};
 
 expresslrs_rf_pref_params_s ExpressLRS_AirRateRFperf[RATE_MAX] = {
-    {0, RATE_500HZ, -105, 1665, 2500, 2500, 3, 5000},
+    {0, RATE_500HZ, -105, 1507, 2500, 2500, 3, 5000},
     {1, RATE_250HZ, -108, 3300, 3000, 2500, 6, 5000},
     {2, RATE_150HZ, -112, 5871, 3500, 2500, 10, 5000},
-    {3, RATE_50HZ, -117, 18443, 4000, 2500, 0, 5000}};
+    {3, RATE_50HZ, -115, 10798, 4000, 2500, 0, 5000}};
 #endif
 
 //const expresslrs_mod_settings_s * ExpressLRS_nextAirRate;
@@ -156,6 +157,11 @@ uint16_t RateEnumToHz(expresslrs_RFrates_e eRate)
 
 void GenerateChannelDataHybridSwitch8(volatile uint8_t* Buffer, uint16_t* elrsControlData)
 {
+#if defined(Regulatory_Domain_ISM_2400)
+    static uint8_t hybridIndex;
+    elrs_v3_pack_channels(Buffer, elrsControlData, hybridIndex, elrsTelemetry.ack);
+    hybridIndex = (hybridIndex + 1) % 7;
+#else
     uint32_t dataVal[16];
     uint16_t elrsChannelDataBuff[4];
     elrsChannelDataBuff[MIX_ELEVATOR] = map(elrsControlData[MIX_ELEVATOR],1000,2000,192,1792);
@@ -192,6 +198,7 @@ void GenerateChannelDataHybridSwitch8(volatile uint8_t* Buffer, uint16_t* elrsCo
     Buffer[6] =   currentSwitches[0] << 6 |bitclearedSwitchIndex << 3 | value;
     
     CRSF_SetSentSwitch(nextSwitchIndex, value);
+#endif
 }
 
 void CRSF_UpdateSwitchValues(uint16_t* elrsControlData)
@@ -378,7 +385,11 @@ uint16_t calcCrc14(uint8_t *data, uint8_t len, uint16_t crc)
 
 uint32_t uidMacSeedGet(void)
 {
+#if defined(Regulatory_Domain_ISM_2400)
+    return elrs_v3_fhss_seed(UID);
+#else
     const uint32_t macSeed = ((uint32_t)UID[2] << 24) + ((uint32_t)UID[3] << 16) +
                              ((uint32_t)UID[4] << 8) + UID[5];
     return macSeed;
+#endif
 }

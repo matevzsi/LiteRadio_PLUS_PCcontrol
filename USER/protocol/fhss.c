@@ -201,13 +201,25 @@ uint8_t FHSSgetCurrIndex()
 
 uint32_t GetInitialFreq()
 {
+#if defined(Regulatory_Domain_ISM_2400)
+    const uint32_t first = FREQ_HZ_TO_REG_VAL_24(2400400000);
+    const uint32_t spread = (FREQ_HZ_TO_REG_VAL_24(2479400000) - first) * 256U / 79U;
+    return first + sync_channel * spread / 256U - FreqCorrection;
+#else
     return FHSSfreqs[sync_channel] - FreqCorrection;  
+#endif
 }
 
 uint32_t FHSSgetNextFreq()
 {
     FHSSptr = (FHSSptr + 1) % FHSS_SEQUENCE_CNT;
+#if defined(Regulatory_Domain_ISM_2400)
+    const uint32_t first = FREQ_HZ_TO_REG_VAL_24(2400400000);
+    const uint32_t spread = (FREQ_HZ_TO_REG_VAL_24(2479400000) - first) * 256U / 79U;
+    uint32_t freq = first + FHSSsequence[FHSSptr] * spread / 256U - FreqCorrection;
+#else
     uint32_t freq = FHSSfreqs[FHSSsequence[FHSSptr]] - FreqCorrection;
+#endif
     return freq;
 }
 
@@ -255,6 +267,9 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 //    DBGLN("Number of FHSS frequencies = %u", FHSS_FREQ_CNT);
 
     sync_channel = FHSS_FREQ_CNT / 2;
+#if defined(Regulatory_Domain_ISM_2400)
+    sync_channel++;
+#endif
 //    DBGLN("Sync channel = %u", sync_channel);
 
     // reset the pointer (otherwise the tests fail)

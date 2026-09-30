@@ -37,9 +37,13 @@ void SX1280_TXnb(volatile uint8_t *data, uint8_t length)
      if (SX1280.currOpmode == SX1280_MODE_TX) //catch TX timeout
     {
         SX1280_SetMode(SX1280_MODE_FS);
+        SX1280_ClearIrqStatus(SX1280_IRQ_RADIO_ALL);
         SX1280_TXnbISR();
         return;
     }
+    /* End continuous RX and discard a late RX IRQ before the next TX slot. */
+    SX1280_SetMode(SX1280_MODE_FS);
+    SX1280_ClearIrqStatus(SX1280_IRQ_RADIO_ALL);
     SX1280Hal_TXenable();                      // do first to allow PA stablise
     SX1280_HalWriteBuffer(0x00, data, length); //todo fix offset to equal fifo addr
     SX1280_SetMode(SX1280_MODE_TX);
@@ -60,7 +64,7 @@ void SX1280_TXnbISR()
 
 void SX1280_RXnbISR()
 {
-    SX1280.currOpmode = SX1280_MODE_FS;
+    /* RX is continuous (timeout 0xffff); leave the mode cache in RX. */
     SX1280_ClearIrqStatus(SX1280_IRQ_RADIO_ALL);
     uint8_t FIFOaddr = SX1280_GetRxBufferAddr();
     SX1280_HalReadBuffer(FIFOaddr, SX1280.radioRXdataBuffer, TXRXBuffSize);
@@ -73,7 +77,11 @@ void  SX1280_IsrCallback(void)
 {
     uint16_t irqStatus = SX1280_GetIrqStatus();
     SX1280_ClearIrqStatus(SX1280_IRQ_RADIO_ALL);
-    SX1280_TXnbISR();
+    if ((irqStatus & SX1280_IRQ_TX_DONE) && SX1280.currOpmode == SX1280_MODE_TX)
+        SX1280_TXnbISR();
+    else if ((irqStatus & SX1280_IRQ_RX_DONE) && SX1280.currOpmode == SX1280_MODE_RX &&
+             !(irqStatus & (SX1280_IRQ_CRC_ERROR | SX1280_IRQ_SYNCWORD_ERROR)))
+        SX1280_RXnbISR();
 }
 void SX1280_Reset(void)
 {

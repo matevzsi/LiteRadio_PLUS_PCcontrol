@@ -85,3 +85,9 @@ PROJECT_PROJ.XSD
 *.Bak
 *.scvd
 *.iex
+
+# Local upstream protocol reference and build artifacts
+.reference/
+*-build.log
+*-rebuild.log
+artifacts/

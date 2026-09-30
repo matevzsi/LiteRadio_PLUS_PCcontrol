@@ -101,30 +101,25 @@ void SX1280_HalWriteCommandBuffer(SX1280_RadioCommands_t command, uint8_t *buffe
 
 void SX1280_HalReadCommand(SX1280_RadioCommands_t command, uint8_t *buffer, uint8_t size)
 {
-    uint8_t halTxBuffer[size + 2];
-    #define RADIO_GET_STATUS_BUF_SIZEOF 3 // special case for command == SX1280_RADIO_GET_STATUS, fixed 3 bytes packet size
-
+    /* GET commands return data after the opcode and status/dummy byte.
+     * Transmit-only SPI discards MISO and leaves callers reading garbage.
+     * The largest command response used here fits in 16 bytes. */
+    uint8_t tx[18] = {0};
+    uint8_t rx[18] = {0};
+    uint16_t length;
+    if (size == 0) return;
+    memset(buffer, 0, size);
+    if (size > 16) return;
+    tx[0] = (uint8_t)command;
+    length = command == SX1280_RADIO_GET_STATUS ? 3 : size + 2;
     SX1280_HalWaitOnBusy();
-
     HAL_GPIO_WritePin(SPI2_NSS_GPIO_Port, SPI2_NSS_Pin, GPIO_PIN_RESET);
-
-    if (command == SX1280_RADIO_GET_STATUS)
+    if (HAL_SPI_TransmitReceive(&hspi2, tx, rx, length, 1000) == HAL_OK)
     {
-        halTxBuffer[0] = (uint8_t)command;
-        halTxBuffer[1] = 0x00;
-        halTxBuffer[2] = 0x00;
-
-        HAL_SPI_Transmit(&hspi2,halTxBuffer,RADIO_GET_STATUS_BUF_SIZEOF,1000);
-        buffer[0] = halTxBuffer[0];
-    }
-    else
-    {
-        halTxBuffer[0] = (uint8_t)command;
-        halTxBuffer[1] = 0x00;
-        memcpy(halTxBuffer + 2, buffer, size);
-        HAL_SPI_Transmit(&hspi2,halTxBuffer,(uint8_t)sizeof(halTxBuffer),1000);
-        
-        memcpy(buffer, halTxBuffer + 2, size);
+        if (command == SX1280_RADIO_GET_STATUS)
+            buffer[0] = rx[0]; /* Same status convention as upstream SX1280Hal. */
+        else
+            memcpy(buffer, rx + 2, size);
     }
     HAL_GPIO_WritePin(SPI2_NSS_GPIO_Port, SPI2_NSS_Pin, GPIO_PIN_SET);
 }

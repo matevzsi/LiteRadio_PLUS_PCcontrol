@@ -5,6 +5,7 @@
 #include "tim.h"
 #include "stmflash.h"
 #include "stdbool.h"
+#include "elrs_v3.h"
 #if defined(Regulatory_Domain_ISM_2400)  
 #include "sx1280.h"
 #include "fhss.h"
@@ -52,76 +53,50 @@ volatile uint8_t busyTransmitting;
 volatile uint8_t UpdateParamReq = 0;
 uint32_t HWtimerPauseDuration = 0;
 
-uint8_t WaitRXresponse = 0;
+volatile uint8_t WaitRXresponse = 0; /* 0=TX, 1=pre-RX, 2=telemetry slot */
+static uint32_t telemetryWindow;
+static uint8_t telemetrySlots;
 uint8_t WaitEepromCommit = 0;
 
-uint8_t InBindingMode = 0;
+volatile uint8_t InBindingMode = 0;
 uint8_t BindingPackage[5];
-uint8_t BindingSendCount = 0;
+volatile uint8_t BindingSendCount = 0;
 
 uint16_t firmwareRev;
 
 uint8_t baseMac[6];
 uint16_t inCRC;
 bool MasterUidUseChipIDFlag = true;
-static void delay(uint16_t n)
-{
-	for(int i=0;i<n;i++){};
-}
 void ProcessTLMpacket()
 {
-    inCRC = (((uint16_t)(Radio.radioRXdataBuffer[0] & 0xFC)) << 6 ) | Radio.radioRXdataBuffer[7];
-
-    Radio.radioRXdataBuffer[0] &= 0x03;
-    uint16_t calculatedCRC = calcCrc14(Radio.radioRXdataBuffer, 7, CRCInitializer);
-
-    uint8_t type = Radio.radioRXdataBuffer[0] & TLM_PACKET;
-    uint8_t TLMheader = Radio.radioRXdataBuffer[1];
-
-    if ((inCRC != calculatedCRC))
-    {
-        return;
-    }
-
-    if (type != TLM_PACKET)
-    {
-        return;
-    }
-
-    if (connectionState != connected)
-    {
-        connectionState = connected;
-        // LPD_DownlinkLQ.init(100);
-        //Serial.println("got downlink conn");
-    }
-
+    uint8_t *packet = Radio.radioRXdataBuffer;
+    uint16_t received = ((uint16_t)(packet[0] & 0xFC) << 6) | packet[7];
+    packet[0] &= 3;
+    if (InBindingMode || !WaitRXresponse || (telemetryWindow & 1U) || packet[0] != TLM_PACKET ||
+        received != calcCrc14(packet, 7, CRCInitializer)) return;
+    connectionState = connected;
     LastTLMpacketRecvMillis = HAL_GetTick();
-    // LQCalc.add();
-
-    switch(TLMheader & ELRS_TELEMETRY_TYPE_MASK)
-    {
-        case ELRS_TELEMETRY_TYPE_LINK:
-            // RSSI received is signed, proper polarity (negative value = -dBm)
-            linkStatistics.uplink_RSSI_1 = Radio.radioRXdataBuffer[2];
-            linkStatistics.uplink_RSSI_2 = Radio.radioRXdataBuffer[3];
-            linkStatistics.uplink_SNR = Radio.radioRXdataBuffer[4];
-            linkStatistics.uplink_Link_quality = Radio.radioRXdataBuffer[5];
-          //  linkStatistics.uplink_TX_Power = POWERMGNT.powerToCrsfPower(POWERMGNT.currPower());
-            linkStatistics.downlink_SNR = Radio.LastPacketSNR;
-            linkStatistics.downlink_RSSI = Radio.LastPacketRSSI;
-            //linkStatistics.downlink_Link_quality = LPD_DownlinkLQ.update(LQCalc.getLQ()) + 1; // +1 fixes rounding issues with filter and makes it consistent with RX LQ Calculation
-          //  linkStatistics.rf_Mode = (uint8_t)RATE_4HZ - (uint8_t)ExpressLRS_currAirRate_Modparams->enum_rate;
-            //MspSender.ConfirmCurrentPayload(Radio.RXdataBuffer[6] == 1);
-            break;
-
+    telemetryWindow |= 1U;
+    linkStatistics.downlink_SNR = Radio.LastPacketSNR;
+    /* CRSF wire RSSI fields are positive magnitudes of negative dBm. */
+    linkStatistics.downlink_RSSI = (uint8_t)(-Radio.LastPacketRSSI);
+    if ((packet[1] & 3) == ELRS_TELEMETRY_TYPE_LINK) {
+        linkStatistics.uplink_RSSI_1 = packet[2] & 0x7F;
+        linkStatistics.uplink_RSSI_2 = packet[3] & 0x7F;
+        linkStatistics.active_antenna = packet[2] >> 7;
+        linkStatistics.uplink_Link_quality = packet[4] & 0x7F;
+        linkStatistics.uplink_SNR = (int8_t)packet[5] / 4;
+    } else if ((packet[1] & 3) == ELRS_TELEMETRY_TYPE_DATA) {
+        elrs_v3_telemetry_receive(packet[1] >> 2, &packet[2]);
     }
 }
 
 void GenerateSyncPacketData()
 {
+#if !defined(Regulatory_Domain_ISM_2400)
     const uint8_t SwitchEncMode = 0x01;
+#endif
     uint8_t Index;
-    uint8_t TLMrate;
     if (syncSpamCounter)
     {
         Index = (tx_config.rate & 0x03);
@@ -141,7 +116,11 @@ void GenerateSyncPacketData()
     Radio.radioTXdataBuffer[0] = SYNC_PACKET & 0x03;
     Radio.radioTXdataBuffer[1] = FHSSgetCurrIndex();
     Radio.radioTXdataBuffer[2] = NonceTX;
+#if defined(Regulatory_Domain_ISM_2400)
+    Radio.radioTXdataBuffer[3] = elrs_v3_sync_config(Index, newRatio);
+#else
     Radio.radioTXdataBuffer[3] = (Index << 6) + (newRatio << 3) + (SwitchEncMode << 1);
+#endif
     Radio.radioTXdataBuffer[4] = UID[3];
     Radio.radioTXdataBuffer[5] = UID[4];
     Radio.radioTXdataBuffer[6] = UID[5];
@@ -155,17 +134,28 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link (hz)
 {
     expresslrs_mod_settings_s * ModParams = get_elrs_airRateConfig(index);
     expresslrs_rf_pref_params_s * RFperf = get_elrs_RFperfParams(index);
-    uint8_t invertIQ = UID[5] & 0x01;
+    uint8_t invertIQ = InBindingMode || (UID[5] & 0x01);
     if ((ModParams == ExpressLRS_currAirRate_Modparams)
         && (RFperf == ExpressLRS_currAirRate_RFperfParams)
         && (invertIQ == Radio.IQinverted))
     return;
-    TIM1->ARR = ModParams->interval;
+    TIM1->ARR = ModParams->interval - 1;
+    TIM1->EGR = TIM_EGR_UG;
+    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE);
     Radio_Config(ModParams->bw, ModParams->sf, ModParams->cr, GetInitialFreq(), ModParams->PreambleLen, invertIQ);
 
     ExpressLRS_currAirRate_Modparams = ModParams;
     ExpressLRS_currAirRate_RFperfParams = RFperf;
 
+    FHSSsetCurrIndex(0);
+    NonceTX = 0;
+    WaitRXresponse = 0;
+    telemetryWindow = 0;
+    telemetrySlots = 0;
+    linkStatistics.downlink_Link_quality = 0;
+    /* CRSF RF-mode enum, distinct from the sync packet rate index. */
+    { static const uint8_t modes[4] = {9, 7, 5, 2};
+      linkStatistics.rf_Mode = modes[index < RATE_MAX ? index : RATE_DEFAULT]; }
     connectionState = disconnected;
     rfModeLastChangedMS = HAL_GetTick();
 }
@@ -193,15 +183,12 @@ void HandleFHSS()
 
 void HandleTLM()
 {
-    if (ExpressLRS_currAirRate_Modparams->TLMinterval > 0)
-    {
-        uint8_t modresult = (NonceTX) % TLMratioEnumToValue(ExpressLRS_currAirRate_Modparams->TLMinterval);
-        if (modresult != 0) // wait for tlm response because it's time
-        {
-            return;
-        }
+    uint8_t denom = TLMratioEnumToValue(ExpressLRS_currAirRate_Modparams->TLMinterval);
+    if (!InBindingMode && denom > 1 && ((uint8_t)(NonceTX + 1) % denom) == 0) {
         RXnb();
         WaitRXresponse = 1;
+        telemetryWindow <<= 1;
+        if (telemetrySlots < 32) ++telemetrySlots;
     }
 }
 
@@ -216,35 +203,22 @@ void Rate_Modify(uint8_t index)
 uint16_t SendRCdataToRF(uint16_t* crsfcontrol_data)
 {
 
-    if (!InBindingMode)
-        NonceTX++; 
-    
+    if (InBindingMode && BindingSendCount >= 7) return 0;
+    if (!InBindingMode) NonceTX++;
+    if (WaitRXresponse == 1) {
+        WaitRXresponse = 2;
+        return 0; /* Reserve a full slot, even if RX already completed. */
+    }
+    if (WaitRXresponse == 2) {
+        uint32_t window = telemetryWindow;
+        uint8_t received = 0;
+        while (window) { received += window & 1U; window >>= 1; }
+        linkStatistics.downlink_Link_quality = telemetrySlots ? received * 100 / telemetrySlots : 0;
+        WaitRXresponse = 0;
+    }
     busyTransmitting = 1;
     uint32_t now = HAL_GetTick();
     static uint8_t syncSlot;
-//    uint8_t *data;
-//    uint8_t maxLength;
-//    uint8_t packageIndex;
-
-//    /////// This Part Handles the Telemetry Response ///////
-//    if ((uint8_t)ExpressLRS_currAirRate_Modparams->TLMinterval > 0)
-//    {
-//        uint8_t modresult = (NonceTX) % TLMratioEnumToValue(ExpressLRS_currAirRate_Modparams->TLMinterval);
-//        if (modresult == 0)
-//        { // wait for tlm response
-//            if (WaitRXresponse == 1)
-//            {
-//                WaitRXresponse = 0;
-//                //LQCalc.inc();
-//                return 0;
-//            }
-//            else
-//            {
-//                NonceTX++;
-//            }
-//        }
-//    }
-
     uint32_t SyncInterval;
 
     SyncInterval = (connectionState == connected) ? ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalConnected : ExpressLRS_currAirRate_RFperfParams->SyncPktIntervalDisconnected;
@@ -254,7 +228,7 @@ uint16_t SendRCdataToRF(uint16_t* crsfcontrol_data)
     uint8_t NonceFHSSresult = NonceTX % ExpressLRS_currAirRate_Modparams->FHSShopInterval;
 //    uint8_t NonceFHSSresultWindow = (NonceFHSSresult == 1 || NonceFHSSresult == 2) ? 1 : 0; // restrict to the middle nonce ticks (not before or after freq chance)
     uint8_t WithinSyncSpamResidualWindow = (HAL_GetTick() - rfModeLastChangedMS < syncSpamAResidualTimeMS) ? 1 : 0;
-    if((syncSpamCounter || WithinSyncSpamResidualWindow) &&  (NonceFHSSresult == 1 || NonceFHSSresult == 2))
+    if(!skipSync && (syncSpamCounter || WithinSyncSpamResidualWindow) &&  (NonceFHSSresult == 1 || NonceFHSSresult == 2))
     {  
         GenerateSyncPacketData();
         syncSlot = 0;
@@ -287,26 +261,19 @@ uint16_t SendRCdataToRF(uint16_t* crsfcontrol_data)
             StubbornSender_GetCurrentPayload(&packageIndex, &maxLength, &data);
             
             Radio.radioTXdataBuffer[0] = MSP_DATA_PACKET & 0x03;
-            Radio.radioTXdataBuffer[1] = packageIndex; 
+            Radio.radioTXdataBuffer[1] = packageIndex | (elrsTelemetry.ack << 7);
             Radio.radioTXdataBuffer[2] = maxLength > 0 ? *data : 0;
-            Radio.radioTXdataBuffer[3] = maxLength >= 1 ? *(data + 1) : 0;
-            Radio.radioTXdataBuffer[4] = maxLength >= 2 ? *(data + 2) : 0;
-            Radio.radioTXdataBuffer[5] = maxLength >= 3 ? *(data + 3) : 0;
-            Radio.radioTXdataBuffer[6] = maxLength >= 4 ? *(data + 4) : 0;           
+            Radio.radioTXdataBuffer[3] = maxLength > 1 ? *(data + 1) : 0;
+            Radio.radioTXdataBuffer[4] = maxLength > 2 ? *(data + 2) : 0;
+            Radio.radioTXdataBuffer[5] = maxLength > 3 ? *(data + 3) : 0;
+            Radio.radioTXdataBuffer[6] = maxLength > 4 ? *(data + 4) : 0;
             // send channel data next so the channel messages also get sent during msp transmissions
             NextPacketIsMspData = 0;
             // counter can be increased even for normal msp messages since it's reset if a real bind message should be sent
             BindingSendCount++;
             if (ExpressLRS_currAirRate_Modparams->TLMinterval != TLM_RATIO_1_2)
                 syncSpamCounter = 1;
-            if (InBindingMode)
-            {
-                // exit bind mode if package after some repeats
-                if (BindingSendCount > 6) 
-                {
-                    ExitBindingMode();
-                }
-            }
+            /* The task exits binding only after the final TX completion. */
         }
         else
         {
@@ -371,9 +338,10 @@ void RXdoneISR()
 
 void TXdoneISR()
 {
-    busyTransmitting = 0;
+    if (!busyTransmitting) return;
     HandleFHSS();
-//    HandleTLM();
+    HandleTLM();
+    busyTransmitting = 0;
 }
 
 void ExpressLRS_Init(uint8_t protocolIndex)
@@ -417,7 +385,7 @@ void setup(void)
     UID[4] = MasterUID[4];
     UID[5] = MasterUID[5];
     
-    CRCInitializer = (UID[4] << 8) | UID[5];
+    CRCInitializer = elrs_v3_crc_init(UID);
     FHSSrandomiseFHSSsequence(uidMacSeedGet()); 
 #if !defined(Regulatory_Domain_ISM_2400)
     Radio.currSyncWord = UID[3];
@@ -435,9 +403,8 @@ void setup(void)
     tx_config.lastPower = 2;
     SetRFLinkRate(RATE_DEFAULT);
     generateCrc14Table();
-    tx_config.rate = 3;
-    tx_config.lastRate = 3;
-    TIM1->ARR = 20000;
+    tx_config.rate = RATE_DEFAULT;
+    tx_config.lastRate = RATE_DEFAULT;
 #elif defined(Regulatory_Domain_EU_868) || defined(Regulatory_Domain_FCC_915)
     SX1276_Init();
     SX1276_Reset();
@@ -466,14 +433,14 @@ void setup(void)
         STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_POWER_ADDR,&txConfigInit[0],1);
         
     }
-    if(7 < txConfigInit[1])
+    if(RATE_MAX <= txConfigInit[1])
     {
         txConfigInit[1] = 2;
         STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_Rate_ADDR,&txConfigInit[1],1);
     }
     if(7 < txConfigInit[2])
     {
-        txConfigInit[2] = 0;
+        txConfigInit[2] = TLM_RATIO_1_8;
         STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_TLM_ADDR,&txConfigInit[2],1);
     }
     tx_config.power = (uint32_t)txConfigInit[0];
@@ -483,78 +450,89 @@ void setup(void)
     tx_config.tlm = (uint32_t)txConfigInit[2];
     
     tx_config.lastTLM = tx_config.tlm;
+    tx_config.lastRate = tx_config.rate;
+    SetRFLinkRate(tx_config.rate);
+    ExpressLRS_currAirRate_Modparams->TLMinterval = (expresslrs_tlm_ratio_e)tx_config.tlm;
+    elrs_v3_telemetry_reset();
 }
 
 #if defined(Regulatory_Domain_ISM_2400)  
 
+/* Stop the scheduler before task-side SPI/configuration or flash writes.
+ * RF IRQs remain enabled while waiting; a missing DIO cannot deadlock the task.
+ * Caller holds the FreeRTOS critical section until ResumeRF(). */
+static void PauseRF(void)
+{
+    uint32_t started = HAL_GetTick();
+    HAL_TIM_Base_Stop_IT(&htim1);
+    while (busyTransmitting && HAL_GetTick() - started < 50) vTaskDelay(1);
+    taskENTER_CRITICAL();
+    SX1280_SetMode(SX1280_MODE_FS);
+    SX1280_ClearIrqStatus(SX1280_IRQ_RADIO_ALL);
+    busyTransmitting = 0;
+    WaitRXresponse = 0;
+}
+
+static void ResumeRF(void)
+{
+    TIM1->CNT = 0;
+    TIM1->EGR = TIM_EGR_UG;
+    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE);
+    HAL_NVIC_ClearPendingIRQ(TIM1_UP_IRQn);
+    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+    HAL_TIM_Base_Start_IT(&htim1);
+    taskEXIT_CRITICAL();
+}
+
 uint16_t SX1280_Process(uint16_t* controlDataBuff)
 {
-    channelData[0] = controlDataBuff[0];
-    channelData[1] = controlDataBuff[1];
-    channelData[2] = controlDataBuff[2];
-    channelData[3] = controlDataBuff[3];
-    channelData[4] = controlDataBuff[4];
-    channelData[5] = controlDataBuff[5];
-    channelData[6] = controlDataBuff[6];
-    channelData[7] = controlDataBuff[7];
-    if(tx_config.modify && (syncSpamCounter == 0) )
-    {
-        switch(tx_config.rate)
-        {
-            case FREQ_2400_RATE_500HZ:
-				SetRFLinkRate(FREQ_2400_RATE_500HZ);
-                TIM1->ARR = 2000;
-                break;
-            case FREQ_2400_RATE_250HZ:
-                SetRFLinkRate(FREQ_2400_RATE_250HZ);
-                TIM1->ARR = 4000;
-                break;
-            case FREQ_2400_RATE_150HZ: 
-                SetRFLinkRate(FREQ_2400_RATE_150HZ);
-                TIM1->ARR = 6666;
-                break;                    
-            case FREQ_2400_RATE_50HZ:
-                SetRFLinkRate(FREQ_2400_RATE_50HZ);
-                TIM1->ARR = 20000;
-                break;
-            default:
-                break;
+    uint8_t i;
+    /* Publish all channels together; the timer must not see a mixed sample. */
+    taskENTER_CRITICAL();
+    for (i = 0; i < 8; ++i) channelData[i] = controlDataBuff[i];
+    taskEXIT_CRITICAL();
+    if (InBindingMode) {
+        if (BindingSendCount >= 7 && !busyTransmitting) ExitBindingMode();
+        return 0;
+    }
+    if (connectionState == connected && HAL_GetTick() - LastTLMpacketRecvMillis > RX_CONNECTION_LOST_TIMEOUT) {
+        connectionState = disconnected;
+        linkStatistics.uplink_Link_quality = 0;
+        linkStatistics.downlink_Link_quality = 0;
+    }
+    /* USB configurator settings are untrusted array indices. */
+    if (tx_config.rate >= RATE_MAX) tx_config.rate = RATE_DEFAULT;
+    if (tx_config.tlm > TLM_RATIO_1_2) tx_config.tlm = TLM_RATIO_1_8;
+    if (tx_config.power > 2) tx_config.power = 2;
+    if (tx_config.rate != tx_config.lastRate && !tx_config.modify) Rate_Modify(tx_config.rate);
+    if (tx_config.modify && syncSpamCounter) return 0;
+    if (tx_config.modify || tx_config.tlm != tx_config.lastTLM || tx_config.power != tx_config.lastPower) {
+        PauseRF();
+        /* Configuration changes can interrupt RF while STM32 flash is erased.
+         * Configure on the bench; re-start a coherent nonce/FHSS epoch. */
+        if (tx_config.rate != tx_config.lastRate) {
+            tx_config.lastRate = tx_config.rate;
+            STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_Rate_ADDR, (uint16_t *)&tx_config.rate, 1);
         }
-        tx_config.modify = 0;
-    }
-    /*内部高频头设置参数更新*/
-    if(tx_config.rate != tx_config.lastRate)
-    {
-        tx_config.lastRate = tx_config.rate;
-        Rate_Modify(tx_config.rate);
-        STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_Rate_ADDR,(uint16_t *)&tx_config.rate,1);
-    }
-    if(tx_config.tlm != tx_config.lastTLM)
-    {
-        tx_config.lastTLM = tx_config.tlm;
+        if (tx_config.tlm != tx_config.lastTLM) {
+            tx_config.lastTLM = tx_config.tlm;
+            STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_TLM_ADDR, (uint16_t *)&tx_config.tlm, 1);
+        }
+        if (tx_config.power != tx_config.lastPower) {
+            tx_config.lastPower = tx_config.power;
+            SX1280_SetPower((PowerLevels_e)(tx_config.power + PWR_25mW));
+            STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_POWER_ADDR, (uint16_t *)&tx_config.power, 1);
+        }
+        ExpressLRS_currAirRate_Modparams = 0; /* Force reset after flash pause. */
+        SetRFLinkRate(tx_config.rate);
         ExpressLRS_currAirRate_Modparams->TLMinterval = (expresslrs_tlm_ratio_e)tx_config.tlm;
-        STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_TLM_ADDR,(uint16_t *)&tx_config.tlm,1);
+        tx_config.modify = 0;
+        syncSpamCounter = syncSpamAmount;
+        ResumeRF();
     }
-    if(tx_config.power != tx_config.lastPower)
-    {
-        tx_config.lastPower = tx_config.power;
-        switch (tx_config.power)
-        {
-            case 0:
-                SX1280_SetPower((PowerLevels_e)PWR_25mW);
-                break;       
-            case 1:
-                SX1280_SetPower((PowerLevels_e)PWR_50mW);
-                break;            
-            case 2:
-                SX1280_SetPower((PowerLevels_e)PWR_100mW);
-                break;            
-            default:
-                break;
-        }
-        STMFLASH_Write(INTERNAL_ELRS_CONFIGER_INFO_POWER_ADDR,(uint16_t *)&tx_config.power,1);
-    }   
-    
+    /* CRSF power enum: 25/50/100 mW -> 2/8/3. */
+    { static const uint8_t powers[3] = {2, 8, 3};
+      linkStatistics.uplink_TX_Power = powers[tx_config.power]; }
     return 0;
 }
 #elif defined(Regulatory_Domain_EU_868) || defined(Regulatory_Domain_FCC_915)
@@ -659,81 +637,34 @@ uint16_t SX1276_Process(uint16_t* controlDataBuff)
 
 void EnterBindingMode()
 {
-    if (InBindingMode) 
-    {
-        // Don't enter binding if we're already binding
-        return;
-    }
-
-    // Disable the TX timer and wait for any TX to complete
-    HAL_TIM_Base_Stop_IT(&htim1);
-    while (busyTransmitting);
-
-    // Queue up sending the Master UID as MSP packets
+    if (InBindingMode) return;
+    PauseRF();
     SendUIDOverMSP();
-
-    // Set UID to special binding values
-    UID[0] = BindingUID[0];
-    UID[1] = BindingUID[1];
-    UID[2] = BindingUID[2];
-    UID[3] = BindingUID[3];
-    UID[4] = BindingUID[4];
-    UID[5] = BindingUID[5];
-
+    /* Keep the normal UID/FHSS seed, as upstream does. Binding overrides
+     * CRC and IQ, and transmits on the UID-independent sync frequency. */
     CRCInitializer = 0;
     InBindingMode = 1;
-
-    // Start attempting to bind
-    // Lock the RF rate and freq while binding
+    NonceTX = 0;
+    NextPacketIsMspData = 1;
+    elrs_v3_telemetry_reset();
+    ExpressLRS_currAirRate_Modparams = 0;
     SetRFLinkRate(RATE_BINDING);
-    Radio.currFreq = GetInitialFreq(); //set frequency first or an error will occur!!!
-    SetFrequencyReg(Radio.currFreq); 
-    // Start transmitting again
-    TIM1->ARR = 20000;
-    HAL_TIM_Base_Start_IT(&htim1);
+    ResumeRF();
 }
 
 void ExitBindingMode()
 {
-    if (!InBindingMode)
-    {
-        // Not in binding mode
-        return;
-    }
-
-    // Reset UID to defined values
-    UID[0] = MasterUID[0];
-    UID[1] = MasterUID[1];
-    UID[2] = MasterUID[2];
-    UID[3] = MasterUID[3];
-    UID[4] = MasterUID[4];
-    UID[5] = MasterUID[5];
-
-    CRCInitializer = (UID[4] << 8) | UID[5];
-
+    if (!InBindingMode) return;
+    PauseRF();
+    CRCInitializer = elrs_v3_crc_init(UID);
     InBindingMode = 0;
     StubbornSender_ResetState();
-
-    switch(tx_config.rate)
-    {
-        case FREQ_2400_RATE_500HZ:
-            break;
-        case FREQ_2400_RATE_250HZ:
-            SetRFLinkRate(FREQ_2400_RATE_250HZ);
-            TIM1->ARR = 4000;
-            break;
-        case FREQ_2400_RATE_150HZ: 
-            SetRFLinkRate(FREQ_2400_RATE_150HZ);
-            TIM1->ARR = 6666;
-            break;                    
-        case FREQ_2400_RATE_50HZ:
-            SetRFLinkRate(FREQ_2400_RATE_50HZ);
-            TIM1->ARR = 20000;
-            break;
-        default:
-            break;
-    }
-
+    NextPacketIsMspData = 0;
+    ExpressLRS_currAirRate_Modparams = 0;
+    SetRFLinkRate(tx_config.rate < RATE_MAX ? tx_config.rate : RATE_DEFAULT);
+    ExpressLRS_currAirRate_Modparams->TLMinterval = (expresslrs_tlm_ratio_e)tx_config.tlm;
+    syncSpamCounter = syncSpamAmount;
+    ResumeRF();
 }
 
 void SendUIDOverMSP()
