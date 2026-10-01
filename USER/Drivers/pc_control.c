@@ -61,10 +61,7 @@ void pc_control_step(const uint16_t physical[8], const uint16_t manual[8],
                      uint16_t output[8], uint32_t now, uint8_t usb_ready)
 {
     unsigned i;
-    uint16_t thrust = physical[1], steer = physical[0];
-    /* Manual throttle: -100..100% stick -> 0..100% lift (50% weight, +50% offset).
-     * PC lift values already describe the final FC output and bypass this mix. */
-    uint16_t lift = pc_control_mix(pc_control_mix(physical[2],100,0),50,50);
+    uint16_t thrust = physical[1], steer = physical[0], lift = physical[2];
     memcpy(output, manual, 8 * sizeof(uint16_t));
     if (physical[PC_ENABLE_INPUT] <= 1750) {
         pc_control_disconnect();

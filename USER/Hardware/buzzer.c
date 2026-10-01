@@ -39,39 +39,25 @@ void Buzzer_BeeUp()
     Buzzer_Start();
 
     Buzzer_On(SolSharp);   // G#4
-    HAL_Delay(210);
-    Buzzer_Stop();
-    HAL_Delay(25);
+    HAL_Delay(210);    
 
     Buzzer_On(LaSharp);    // A#4
     HAL_Delay(155);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(Do5);        // C5
     HAL_Delay(255);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(LaSharp);    // A#4
     HAL_Delay(135);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(SolSharp);   // G#4
     HAL_Delay(195);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(Do5);        // C5
     HAL_Delay(155);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(ReSharp5);   // D#5
     HAL_Delay(155);
-    Buzzer_Stop();
-    HAL_Delay(25);
 
     Buzzer_On(Sol5);       // G5
     HAL_Delay(395);
@@ -216,30 +202,30 @@ void Buzzer_On(uint8_t tone)
 			HAL_TIM_SET_COMPARE(242);
 			break;
 
-        case SolSharp:   // G#4 = 415.30 Hz
-            HAL_TIM_SET_AUTORELOAD(577);
-            HAL_TIM_SET_COMPARE(289);
-            break;
+		case SolSharp:   // G#4 = 415.30 Hz
+			HAL_TIM_SET_AUTORELOAD(577);
+			HAL_TIM_SET_COMPARE(289);
+			break;
 
-        case LaSharp:    // A#4 = 466.16 Hz
-            HAL_TIM_SET_AUTORELOAD(514);
-            HAL_TIM_SET_COMPARE(257);
-            break;
+		case LaSharp:    // A#4 = 466.16 Hz
+			HAL_TIM_SET_AUTORELOAD(514);
+			HAL_TIM_SET_COMPARE(257);
+			break;
 
-        case Do5:        // C5 = 523.25 Hz
-            HAL_TIM_SET_AUTORELOAD(458);
-            HAL_TIM_SET_COMPARE(229);
-            break;
+		case Do5:        // C5 = 523.25 Hz
+			HAL_TIM_SET_AUTORELOAD(458);
+			HAL_TIM_SET_COMPARE(229);
+			break;
 
-        case ReSharp5:   // D#5 = 622.25 Hz
-            HAL_TIM_SET_AUTORELOAD(385);
-            HAL_TIM_SET_COMPARE(193);
-            break;
+		case ReSharp5:   // D#5 = 622.25 Hz
+			HAL_TIM_SET_AUTORELOAD(385);
+			HAL_TIM_SET_COMPARE(193);
+			break;
 
-        case Sol5:       // G5 = 783.99 Hz
-            HAL_TIM_SET_AUTORELOAD(305);
-            HAL_TIM_SET_COMPARE(153);
-            break;
+		case Sol5:       // G5 = 783.99 Hz
+			HAL_TIM_SET_AUTORELOAD(305);
+			HAL_TIM_SET_COMPARE(153);
+			break;
 	}
 }
 
