@@ -91,3 +91,7 @@ PROJECT_PROJ.XSD
 *-build.log
 *-rebuild.log
 artifacts/
+
+# Python generated caches
+__pycache__/
+*.pyc

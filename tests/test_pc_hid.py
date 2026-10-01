@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import struct
+import math
 
 spec = importlib.util.spec_from_file_location('pc_hid', Path(__file__).resolve().parents[1] / 'tools/pc_hid.py')
 host = importlib.util.module_from_spec(spec)
@@ -32,4 +33,37 @@ assert decoder.receive(fragment(3,large,53,11)) is None
 assert decoder.receive(fragment(2,large,53,11))['frame'] == large.hex()
 frame[-1] ^= 1
 assert decoder.receive(fragment(3,frame,0,12))['type'] == 'invalid_crsf'
+assert host.control_channels(thrust=-100,steer=0,lift=-100)[2:6] == [1500,1500,988,1000]
+assert host.control_channels(thrust=0,steer=-100,lift=0)[2:6] == [1750,1000,988,1500]
+assert host.control_channels(thrust=100,steer=100,lift=100)[2:6] == [2000,2000,988,2000]
+for value in range(-100,101):
+    channels=host.control_channels(thrust=value,steer=value,lift=value)
+    fc_thrust=1500+(channels[2]-1500)*2-500
+    assert abs(fc_thrust-(1500+5*value))<=1
+    assert channels[3]==channels[5]==1500+5*value
+for value in [-101,101,math.nan,math.inf]:
+    for name in ['lift','thrust','steer']:
+        try:
+            host.control_channels(**{name:value})
+            raise AssertionError('bad named control accepted')
+        except ValueError:
+            pass
+class FakeHid:
+    def __init__(self): self.writes=[]; self.closed=False
+    def write(self,p): self.writes.append(p); return len(p)
+    def read(self,n): return []
+    def close(self): self.closed=True
+device=FakeHid()
+client=host.LiteRadioClient(device=device)
+client.send_control(thrust=-40,steer=50,lift=-30)
+slots=struct.unpack_from('<8H',device.writes[0],11)
+assert slots[2]==1650 and slots[3]==1750 and slots[5]==1350
+client.close()
+assert device.closed and device.writes[-1][4]==0
 print('PASS: HID host encoding, validation, CRSF fragmentation and battery decoding')
+
+status=bytearray(64);status[:4]=b'PC\x01\x21'
+assert host.Decoder().receive(status)['arm_command'] is None
+status[36]=1;assert host.Decoder().receive(status)['arm_command'] is False
+status[36]=2;assert host.Decoder().receive(status)['arm_command'] is True
+print('PASS: arm command decoding and compatibility with older firmware')

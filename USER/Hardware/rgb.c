@@ -6,6 +6,9 @@
 #include "radiolink.h"
 #include "stdbool.h"
 #include "common.h"
+#if defined(LiteRadio_Plus_SX1280)
+#include "pc_control.h"
+#endif
 EventGroupHandle_t rgbEventHandle;
 
 static uint8_t bindStatus = 0;
@@ -347,7 +350,14 @@ void rgbTask(void* param)
                 }
                 else
                 {
-                    RGB_Set(BLUE,BRIGHTNESS_MAX); 
+#if defined(LiteRadio_Plus_SX1280)
+                    /* 100 ms per color: five blue/red cycles per second.
+                     * Tick-based indication adds no delay to the LED or RF tasks. */
+                    RGB_Set(pcControl.state == PC_ACTIVE && ((HAL_GetTick()/100U)&1U)
+                            ? RED : BLUE, BRIGHTNESS_MAX);
+#else
+                    RGB_Set(BLUE,BRIGHTNESS_MAX);
+#endif
 #if defined(LiteRadio_Plus_CC2500)  
 		if(Get_Protocol_Select() <= CC2500_FHSS)//CC2500使用内置射频模块才打开定时器1
         {

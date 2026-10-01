@@ -3,7 +3,7 @@
 Firmware for **BETAFPV LiteRadio 2 SE V2 ELRS 2.4 GHz**, based on this
 LiteRadio_PLUS fork and the OTA protocol in **ExpressLRS 3.5.3**.
 
-**Status:** manual ELRS binding and control were confirmed working by the user.
+**Status:** manual ELRS binding and control are working.
 This build adds a separate USB command/telemetry HID interface, concurrent physical
 joystick reports, hovercraft mapping and a PC watchdog. The USB additions pass
 host tests and compile, but still need hardware verification.
@@ -20,7 +20,9 @@ See [USB controls, mapping, protocol and test utility](docs/USB-control.md).
   raw CRSF frame reconstruction/acknowledgement.
 * Coherent channel snapshots and rate/bind transitions; no USB work in RF ISRs.
 * Vendor HID commands, SC manual/PC selection, 100 ms watchdog and telemetry forwarding.
-* CH3 Ele/GV1 at 200%/-100%, CH4 Ail/GV2, CH5 physical SB, CH6 Thr/GV3.
+* Fast blue/red remote LED indication while PC control is active.
+* CH3 Ele/thrust at 200%/-100%, CH4 Ail/steer, CH5 physical SB.
+* CH6 manual Thr/lift at 50%/+50%: full stick travel maps to 0..100% lift.
 * Original joystick report format and bootloader/virtual COM path retained.
   The application itself has no CDC COM interface.
 
@@ -102,7 +104,8 @@ telemetry slots/s; CRSF frames take several slots, and link-stat packets also
 use this bandwidth. RC slots are reduced accordingly. Change RF settings only
 while disarmed: saving STM32 flash briefly interrupts the link.
 
-Channel values remain **988..2012**, nominal center 1500, converted to CRSF
+The hovercraft profile clamps FC outputs to **1000..2000** (-100..100%),
+nominal center 1500, converted to CRSF
 before V3 packing. The [hovercraft profile](docs/USB-control.md) maps CH3 to
 forward thrust, CH4 to differential thrust, CH5 to SB, and CH6 to lift.
 ELRS Hybrid is unchanged: CH1..4 have 10-bit resolution, CH5 is two-position,
@@ -146,10 +149,20 @@ thrust/lift outputs; SB retains control of CH5. Cycle SC before restarting PC co
 python -m pip install hidapi
 python tools/pc_hid.py --list
 python tools/pc_hid.py --joystick
-python tools/pc_hid.py --send --gv1 0 --gv2 0 --gv3 -100
+python tools/pc_hid.py --send --lift -100 --thrust -100 --steer 0
 ```
 
 The utility monitors by default. `--send` transmits a 50 Hz command stream.
-Put SC low before starting, then high to permit PC control. GV1/2/3 replace
-Ele/Ail/Thr **before mixing**. Full report formats, limits and acceptance steps
-are in [USB-control.md](docs/USB-control.md).
+Put SC low before starting, then high to permit PC control. `lift`, `thrust`
+and `steer` specify FC outputs in **-100..100%**. Manual forward elevator travel
+0..100% maps to FC thrust -100..100%; Python compensates for this mix once.
+
+For the existing W/A/D/Space controls, run:
+
+```powershell
+python tools/keyboard_control.py
+```
+
+W targets -40% thrust, A/D steer at +/-50%, and Space toggles lift to -30%.
+The previous example's slew limits, 40 ms period and focus-loss reset are retained.
+Full report formats, limits and acceptance steps are in [USB-control.md](docs/USB-control.md).

@@ -37,7 +37,12 @@ typedef enum
 	Fa,
 	So,
 	La,
-	Si
+	Si,
+	SolSharp,   // G#4
+    LaSharp,    // A#4
+    Do5,        // C5
+    ReSharp5,   // D#5
+    Sol5,       // G5
 }tone;
 
 void HAL_TIM_SET_COMPARE(uint16_t compare);

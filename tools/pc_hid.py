@@ -5,10 +5,23 @@ Uses interface 1 / usage page FF00; never sends commands to the joystick.
 """
 import argparse
 import json
+import math
 import struct
 import time
 
 VID, PID = 0x0483, 0x5750
+
+
+def control_channels(*, lift=-100, thrust=-100, steer=0):
+    """FC output percentages (-100..100), converted to the HID pre-mix inputs.
+
+    Manual elevator uses only its 0..100% forward half. Undo its 200%/-100%
+    mix here, so Python thrust -100/0/+100 reaches FC -100/0/+100 exactly.
+    """
+    if any(not math.isfinite(v) or not -100 <= v <= 100 for v in (lift, thrust, steer)):
+        raise ValueError('lift, thrust and steer must be finite percentages in -100..100')
+    return [1500, 1500, round(1500 + 2.5*(thrust+100)),
+            round(1500 + 5*steer), 988, round(1500 + 5*lift), 1500, 1500]
 
 
 def command(sequence, channels, mask=0x2C, watchdog=100, stop=False):
@@ -51,7 +64,8 @@ class Decoder:
                         telemetry_dropped=struct.unpack_from('<I', raw, 18)[0],
                         link_state=raw[22], rssi_dbm=-raw[23], lq=raw[25],
                         snr_db=struct.unpack_from('b', raw, 26)[0],
-                        locked=bool(raw[33]), mask=raw[34], radio_powered=bool(raw[35]))
+                        locked=bool(raw[33]), mask=raw[34], radio_powered=bool(raw[35]),
+                        arm_command=(raw[36] == 2) if raw[36] in (1, 2) else None)
         if raw[3] != 0x20:
             return None
         seq = struct.unpack_from('<I', raw, 4)[0]
@@ -91,24 +105,70 @@ def select_device(hid, interface, serial):
     return dev
 
 
+class LiteRadioClient:
+    """Named FC controls over the dedicated HID interface; no serial port needed."""
+    def __init__(self, serial=None, watchdog=100, device=None):
+        if not 50 <= watchdog <= 250:
+            raise ValueError('Watchdog must be 50..250 ms')
+        if device is None:
+            import hid
+            device = select_device(hid, 1, serial)
+        self.device, self.watchdog = device, watchdog
+        self.sequence = 0
+        self.decoder = Decoder()
+        self.status = self.battery = None
+        self.status_received_at = self.battery_received_at = None
+
+    def send_control(self, *, lift=-100, thrust=-100, steer=0):
+        packet = command(self.sequence, control_channels(lift=lift, thrust=thrust, steer=steer),
+                         watchdog=self.watchdog)
+        if self.device.write(packet) != len(packet):
+            raise OSError('Incomplete HID command write')
+        self.sequence = (self.sequence + 1) & 65535
+
+    def read_telemetry(self):
+        for _ in range(32):
+            raw = self.device.read(64)
+            if not raw:
+                break
+            result = self.decoder.receive(raw)
+            if result and result['type'] == 'status':
+                self.status = result
+                self.status_received_at = time.monotonic()
+            elif result and 'voltage_v' in result:
+                self.battery = result
+                self.battery_received_at = time.monotonic()
+        return self.status
+
+    def close(self):
+        if self.device is None:
+            return
+        try:
+            self.device.write(command(self.sequence, control_channels(),
+                                      watchdog=self.watchdog, stop=True))
+        finally:
+            self.device.close()
+            self.device = None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true')
     parser.add_argument('--serial')
     parser.add_argument('--send', action='store_true')
     parser.add_argument('--joystick', action='store_true', help='also read physical joystick interface')
-    parser.add_argument('--gv1', type=float, default=0, help='Ele input, -100..100 percent, default 0')
-    parser.add_argument('--gv2', type=float, default=0, help='Ail input, -100..100 percent')
-    parser.add_argument('--gv3', type=float, default=-100, help='Thr input, -100..100 percent')
+    parser.add_argument('--lift', type=float, default=-100, help='FC lift output, -100..100 percent')
+    parser.add_argument('--thrust', type=float, default=-100, help='FC thrust output, -100..100 percent')
+    parser.add_argument('--steer', type=float, default=0, help='FC steering output, -100..100 percent')
     parser.add_argument('--channels', type=int, nargs=8, help='override all eight input slots, units 988..2012')
     parser.add_argument('--mask', type=lambda s: int(s, 0), default=0x2C)
     parser.add_argument('--watchdog', type=int, default=100)
     parser.add_argument('--seconds', type=float, default=0, help='0 runs until Ctrl+C')
     args = parser.parse_args()
-    if any(not -100 <= v <= 100 for v in (args.gv1, args.gv2, args.gv3)):
-        parser.error('GV values must be -100..100')
-    channels = args.channels or [1500, 1500, round(1500+5*args.gv1),
-                                round(1500+5*args.gv2), 988, round(1500+5*args.gv3), 1500, 1500]
+    try:
+        channels = args.channels or control_channels(lift=args.lift, thrust=args.thrust, steer=args.steer)
+    except ValueError as exc:
+        parser.error(str(exc))
     command(0, channels, args.mask, args.watchdog)  # validate before opening anything
     import hid
     if args.list:

@@ -52,8 +52,8 @@ uint16_t pc_control_mix(uint16_t input, int16_t weight, int16_t offset)
 {
     /* Weight first, then offset; +/-100% spans 1000..2000 us. */
     int32_t value = 1500 + ((int32_t)input - 1500) * weight / 100 + (int32_t)offset * 5;
-    if (value < 988) value = 988;
-    if (value > 2012) value = 2012;
+    if (value < 1000) value = 1000;
+    if (value > 2000) value = 2000;
     return (uint16_t)value;
 }
 
@@ -61,7 +61,10 @@ void pc_control_step(const uint16_t physical[8], const uint16_t manual[8],
                      uint16_t output[8], uint32_t now, uint8_t usb_ready)
 {
     unsigned i;
-    uint16_t forward = physical[1], differential = physical[0], lift = physical[2];
+    uint16_t thrust = physical[1], steer = physical[0];
+    /* Manual throttle: -100..100% stick -> 0..100% lift (50% weight, +50% offset).
+     * PC lift values already describe the final FC output and bypass this mix. */
+    uint16_t lift = pc_control_mix(pc_control_mix(physical[2],100,0),50,50);
     memcpy(output, manual, 8 * sizeof(uint16_t));
     if (physical[PC_ENABLE_INPUT] <= 1750) {
         pc_control_disconnect();
@@ -78,20 +81,22 @@ void pc_control_step(const uint16_t physical[8], const uint16_t manual[8],
                 pcControl.locked = 1;
             }
             pcControl.state = PC_FAILSAFE;
-            forward = 1500; differential = 1500; lift = 988;
+            thrust = 1500; steer = 1500; lift = 988;
             for (i = 0; i < 8; ++i)
                 if (pcControl.mask & (1U << i)) output[i] = 1500;
         } else {
             pcControl.state = PC_ACTIVE;
             for (i = 0; i < 8; ++i)
                 if (pcControl.mask & (1U << i)) output[i] = pcControl.channel[i];
-            if (pcControl.mask & (1U << 2)) forward = pcControl.channel[2];
-            if (pcControl.mask & (1U << 3)) differential = pcControl.channel[3];
+            if (pcControl.mask & (1U << 2)) thrust = pcControl.channel[2];
+            if (pcControl.mask & (1U << 3)) steer = pcControl.channel[3];
             if (pcControl.mask & (1U << 5)) lift = pcControl.channel[5];
         }
     }
-    output[2] = pc_control_mix(forward, 200, -100);
-    output[3] = pc_control_mix(differential, 100, 0);
+    output[2] = pc_control_mix(thrust, 200, -100);
+    output[3] = pc_control_mix(steer, 100, 0);
     output[4] = physical[5]; /* CH5 always SB, including failsafe. */
     output[5] = pc_control_mix(lift, 100, 0);
+    /* FC inputs stay in the nominal -100..100% range, including stick overtravel. */
+    for (i=0;i<8;++i) output[i]=pc_control_mix(output[i],100,0);
 }

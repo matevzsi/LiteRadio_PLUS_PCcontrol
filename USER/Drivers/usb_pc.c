@@ -10,6 +10,7 @@
 #include "crsf.h"
 #include "common.h"
 #include "status.h"
+#include "radiolink.h"
 #include <string.h>
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
@@ -161,6 +162,9 @@ void USB_PC_Poll(void)
         put32(tx+18,dropped_frames); tx[22]=connectionState;
         memcpy(tx+23,&linkStatistics,sizeof(linkStatistics));
         tx[33]=pcControl.locked; tx[34]=pcControl.mask; tx[35]=Status_RadioPowered();
+        /* 0 = unavailable, 1 = disarm command, 2 = arm command. Not FC confirmation. */
+        if (tx[35] && channelData[4]>=1000 && channelData[4]<=2000)
+            tx[36]=channelData[4]>1500 ? 2 : 1;
     } else { taskEXIT_CRITICAL(); return; }
     busy=1;
     if (USBD_LL_Transmit(&hUsbDeviceFS,0x82,tx,sizeof(tx)) != USBD_OK) busy=0;

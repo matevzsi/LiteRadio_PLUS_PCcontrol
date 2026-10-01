@@ -47,6 +47,7 @@ USBD_ClassTypeDef USBD_CUSTOM_HID={fake_init,fake_init,fake_setup,nullptr,fake_r
 static uint32_t HAL_GetTick(){return ticks;}
 static uint8_t Status_RadioPowered(){return 1;}
 static uint8_t connectionState=2;
+static uint16_t channelData[16]={1500,1500,1000,1500,2000};
 static uint8_t linkStatistics[10]={};
 static uint8_t USBD_LL_OpenEP(USBD_HandleTypeDef*,uint8_t,uint8_t,uint16_t){return USBD_OK;}
 static uint8_t USBD_LL_CloseEP(USBD_HandleTypeDef*,uint8_t){return USBD_OK;}
@@ -96,7 +97,7 @@ void test_usb() {
     assert(dataout(dev,2)==USBD_OK && pcControl.accepted==accepted+2);
     received_size=5;assert(dataout(dev,2)==USBD_OK && pcControl.accepted==accepted+2);
     dataout(dev,1);datain(dev,1);assert(legacy_out_calls==1 && legacy_in_calls==1);
-    ticks=100;USB_PC_Poll();assert(sent[3]==0x21 && busy);
+    ticks=100;USB_PC_Poll();assert(sent[3]==0x21 && busy && sent[36]==2);
     auto oldcalls=tx_calls;USB_PC_Poll();assert(tx_calls==oldcalls);datain(dev,2);
     elrsTelemetry.frames=10;elrsTelemetry.length=64;
     for(unsigned i=0;i<64;++i) elrsTelemetry.frame[i]=i;
@@ -104,6 +105,8 @@ void test_usb() {
     assert(!memcmp(sent+11,elrsTelemetry.frame,53));datain(dev,2);
     ticks=104;USB_PC_Poll();assert(sent[9]==53 && sent[10]==11);
     assert(!memcmp(sent+11,elrsTelemetry.frame+53,11));datain(dev,2);
+    channelData[4]=1500; ticks=300;USB_PC_Poll();assert(sent[36]==1);datain(dev,2);
+    channelData[4]=0; ticks=400;USB_PC_Poll();assert(sent[36]==0);datain(dev,2);
     assert(deinit(dev,1)==USBD_OK && pcControl.locked && !pcControl.valid);
     assert(!dev->ep_in[2].is_used && !dev->ep_out[2].is_used);
 }

@@ -799,6 +799,21 @@
               <FileType>1</FileType>
               <FilePath>..\USER\protocol\common.c</FilePath>
             </File>
+            <File>
+              <FileName>elrs_v3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\protocol\elrs_v3.c</FilePath>
+            </File>
+            <File>
+              <FileName>pc_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\Drivers\pc_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>usb_pc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\Drivers\usb_pc.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -2360,6 +2375,11 @@
               <FilePath>..\USER\protocol\fhss.c</FilePath>
             </File>
             <File>
+              <FileName>common.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\protocol\common.c</FilePath>
+            </File>
+            <File>
               <FileName>elrs_v3.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\USER\protocol\elrs_v3.c</FilePath>
@@ -2373,11 +2393,6 @@
               <FileName>usb_pc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\USER\Drivers\usb_pc.c</FilePath>
-            </File>
-            <File>
-              <FileName>common.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\USER\protocol\common.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -3994,6 +4009,21 @@
                   </Cads>
                 </FileArmAds>
               </FileOption>
+            </File>
+            <File>
+              <FileName>elrs_v3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\protocol\elrs_v3.c</FilePath>
+            </File>
+            <File>
+              <FileName>pc_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\Drivers\pc_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>usb_pc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\USER\Drivers\usb_pc.c</FilePath>
             </File>
           </Files>
         </Group>
